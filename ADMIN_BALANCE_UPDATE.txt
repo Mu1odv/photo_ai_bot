@@ -1,0 +1,55 @@
+╔════════════════════════════════════════════════════════════╗
+║           PHOTO AI BOT - ADMIN BALANCE MANAGEMENT         ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ ADMIN BALANCE MANAGEMENT QO'SHILDI
+
+🔍 **/solo [user_id]** - Balansni ko'rish komandasi
+   - Admin uchun foydalanuvchi balansini ko'rish
+   - Format: /solo 123456789
+   - Ko'rsatadi:
+     • User ID
+     • Ism (full_name)
+     • Username
+     • Hozirgi balans
+     • To'ldirish uchun: /give [id] [miqdor]
+
+💰 **/give [user_id] [amount]** - Balans boshqarish
+   - Musbat qiymat: balans qo'shish
+   - Manfiy qiymat: balans kamaytirish
+   - Format: /give 123456789 500 (qo'shish)
+   - Format: /give 123456789 -200 (kamaytirish)
+   - Foydalanuvchiga notification yuboriladi
+
+✅ **TECHNICAL DETAILS:**
+   - Database: SQLite bilan to'g'ridan-to'g'ri add_balance() chaqiradi
+   - Security: Faqat ADMIN_IDS ro'yxatidagi foydalanuvchilar
+   - Error handling: Xato format va exception handling
+   - Logging: Barcha operatsiyalar log qilinadi
+
+✅ **DATABASE OPERATIONS:**
+   - add_balance(user_id, amount): qiymat qo'shadi/kamaytiradi
+   - get_balance(user_id): balansni qaytaradi
+   - get_user(user_id): foydalanuvchi ma'lumotlarini qaytaradi
+
+✅ **TEST RESULTS:**
+   - Syntax validation: OK
+   - Database operations: OK
+   - Balance add/subtract: OK
+   - Handler imports: OK
+
+╔════════════════════════════════════════════════════════════╗
+║  ADMIN ENDI BALANSNI TO'G'RI BOSHQARA OLADI!              ║
+║        🚀 BOT ISHGA TUSHIRISH: python main.py              ║
+╚════════════════════════════════════════════════════════════╝
+
+ADMIN WORKFLOW:
+1. /solo [user_id] → balansni ko'radi
+2. /give [user_id] [amount] → balansni o'zgartiradi
+3. Database → avtomatik saqlanadi
+4. User → notification oladi
+
+MISOLLAR:
+• /solo 123456789 → "Balans: 500"
+• /give 123456789 300 → "Balans: 800"
+• /give 123456789 -100 → "Balans: 700"

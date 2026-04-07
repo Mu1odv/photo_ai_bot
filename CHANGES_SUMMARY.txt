@@ -1,0 +1,61 @@
+╔════════════════════════════════════════════════════════════╗
+║           PHOTO AI BOT - INCREMENTAL UPDATE SUMMARY        ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ 1. DATABASE.PY - SQLite Database
+   • 'balance' ustuni: INTEGER DEFAULT 0
+   • get_balance(user_id) - balansni olish
+   • add_balance(user_id, amount) - balans qo'shish/kamaytirish
+
+✅ 2. HANDLERS/USER.PY - User Handlers
+   • /start: yangilangan matn (Markdown format bilan)
+     - "[Ism], xush kelibsiz! 🎉"
+     - Rasm/Video qilish info
+     - Qanday ishlatish bosqichlari
+   
+   • Rasm yuborish (📸 RASM YUBORING):
+     - Inline tugmalar: 🎬 Video qilish, 🖼 Chiqartirish
+   
+   • Admin notifikasiyalari (caption'da):
+     - photo_to_video: "User ID: [id], Username: @[username], Xizmat: Video yaratish"
+     - photo_to_print → print_with_frame: "User ID: [id], Username: @[username], Xizmat: Ramka bilan print"
+     - photo_to_print → print_digital: "User ID: [id], Username: @[username], Xizmat: Elektron variant"
+     - ask_for_video (🎬 Video yuboring): Admin xabari + foydalanuvchi ma'lumoti
+
+✅ 3. HANDLERS/ADMIN.PY - Admin Commands
+   • /give [user_id] [ball] komandasi:
+     - Faqat ADMIN_IDS'da bo'lgan foydalanuvchi ishlatishi mumkin
+     - database.add_balance() chaqiradi
+     - Foydalanuvchiga xabar yuklatadi: "🎉 [amount] ga to'ldirildi! 💰 Hozirgi balans: [balance]"
+   
+   • 📊 Statistika tugmasi tuzatildi (SQLite'ga mos): SELECT COUNT(*) FROM users
+
+✅ 4. KEYBOARDS.PY - User Interface
+   • Asosiy menyuda 5 ta tugma:
+     1. 📸 Rasm yuboring
+     2. 🎬 Video yuboring
+     3. 💰 Balansim
+     4. 💳 To'ldirish
+     5. 👨‍💻 Admin
+   
+   • Rasm qabul qilingandan keyin inline tugmalar:
+     - 🎬 Rasmni video qilish
+     - 🖼 Rasmni chiqartirish
+
+   • Chiqartirish opsiyalari (inline):
+     - 🖼 Ramka bilan
+     - 📧 Elektron variant
+
+╔════════════════════════════════════════════════════════════╗
+║  USERNING TALABIGA MOSlab INCREMENTAL O'ZGARISHLAR TAYYOQ!   ║
+║        🚀 BOT ISHGA TUSHIRISH: python main.py              ║
+╚════════════════════════════════════════════════════════════╝
+
+USER TALABLAR VS IMPLEMENTASIYA:
+[✅] 1. database.py - balance ustuni va metodlar
+[✅] 2. handlers/user.py - /start matn yangilangan
+[✅] 3. Rasm logikasi - 2 inline tugma + admin notifikasiya
+[✅] 4. handlers/admin.py - /give [user_id] [ball] komandasi
+[✅] 5. keyboards.py - 5 ta main menu tugma
+
+INCREMENTAL CHANGE = AVVALGI KOD BUZILMADI, YANGILANGAN QISQALAR QO'SHILDI

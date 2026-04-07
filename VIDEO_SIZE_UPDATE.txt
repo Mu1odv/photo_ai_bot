@@ -1,0 +1,36 @@
+╔════════════════════════════════════════════════════════════╗
+║           PHOTO AI BOT - VIDEO SIZE LIMIT UPDATE          ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ VIDEO SIZE LIMIT O'ZGARTIRILDI
+
+🎬 **Video yuborish limiti:**
+   - **Avval:** Maksimal hajm: 50 MB
+   - **Hozir:** Maksimal hajm: 1 GB
+
+📝 **O'zgarish joyi:**
+   - Fayl: handlers/user.py
+   - Handler: ask_for_video()
+   - Xabar: "🎬 Video fayl yuboring!\n\nMaksimal hajm: 1 GB"
+
+✅ **TECHNICAL DETAILS:**
+   - Bu faqat xabar matnini o'zgartiradi
+   - Haqiqiy limit Telegram API tomonidan belgilanadi
+   - 1 GB = 1024 MB (realistik limit)
+
+✅ **TEST RESULTS:**
+   - Syntax validation: OK
+   - Handler import: OK
+   - Message text updated: OK
+
+╔════════════════════════════════════════════════════════════╗
+║  VIDEO LIMIT 50 MB → 1 GB GA O'ZGARTIRILDI!               ║
+║        🚀 BOT ISHGA TUSHIRISH: python main.py              ║
+╚════════════════════════════════════════════════════════════╝
+
+VIDEO UPLOAD FLOW:
+1. User 🎬 Video yuboring → bosadi
+2. Bot: "Video fayl yuboring! Maksimal hajm: 1 GB" → javob beradi
+3. User: video yuboradi (1 GB gacha)
+4. Bot: "✅ Video qabul qilindi!" → javob beradi
+5. Admin: video fayl + caption → oladi

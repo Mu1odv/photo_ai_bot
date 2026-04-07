@@ -1,0 +1,48 @@
+╔════════════════════════════════════════════════════════════╗
+║           PHOTO AI BOT - VIDEO HANDLER UPDATE SUMMARY      ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ VIDEO HANDLER QO'SHILDI
+
+🎬 **BTN_SEND_VIDEO bosilganda:**
+   - Admin'ga text notification yuboriladi
+   - User ID, Username, Xizmat turi ko'rsatiladi
+
+🎥 **Video fayl yuborilganda:**
+   - Admin'ga video fayl yuboriladi (send_video)
+   - Caption format:
+     ```
+     📹 Video qabul qilindi
+
+     👤 Foydalanuvchi: [full_name] (link)
+     📧 Username: @[username]
+     🆔 User ID: [id]
+     📋 Xizmat: Video ishlash
+     ```
+   - parse_mode="HTML" ishlatildi
+   - Error handling: agar video yuborish xato bo'lsa, text fallback
+
+✅ **TECHNICAL DETAILS:**
+   - Handler: @router.message(UserStates.waiting_for_photo)
+   - Filter: if not message.video: return
+   - State: clear() qilinadi video qabul qilingandan keyin
+   - Admin ID: config'dan olinadi
+
+✅ **TEST RESULTS:**
+   - Syntax validation: OK
+   - Import tests: OK
+   - Database tests: OK
+   - Handler logic: OK
+
+╔════════════════════════════════════════════════════════════╗
+║  ADMIN ENDI BARCHA MEDIA (RASM + VIDEO) QABUL QILADI!     ║
+║        🚀 BOT ISHGA TUSHIRISH: python main.py              ║
+╚════════════════════════════════════════════════════════════╝
+
+MEDIA FLOW:
+1. User 🎬 Video yuboring → bosadi
+2. Bot: "Video fayl yuboring!" → javob beradi
+3. Admin: text notification → oladi
+4. User: video yuboradi
+5. Bot: "✅ Video qabul qilindi!" → javob beradi
+6. Admin: video fayl + caption → oladi
