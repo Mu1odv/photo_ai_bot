@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 def order_type_label(order_type: str) -> str:
     return {
+        "enhance": "Rasmni yangilash",
         "video": "Rasmdan video",
         "print_frame": "Ramka bilan chop etish",
         "print_digital": "Elektron chop etish",
@@ -241,7 +242,7 @@ async def reject_order(callback: CallbackQuery, bot: Bot):
 
 @router.message(F.text == "🔙 Asosiy menyu")
 async def back_home(message: Message):
-    from handlers.user import main_menu_keyboard
+    from keyboards import main_menu_keyboard
     await message.answer("Asosiy menyu", reply_markup=main_menu_keyboard())
 
 

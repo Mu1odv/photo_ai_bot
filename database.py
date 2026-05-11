@@ -154,6 +154,19 @@ class Database:
         finally:
             conn.close()
 
+    def update_order_details(self, order_id, details):
+        """Buyurtma tafsilotlarini yangilash"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE orders SET details = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (details, order_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
 
 # Global database instance
 db = Database()

@@ -25,6 +25,7 @@ def photo_options_keyboard() -> InlineKeyboardMarkup:
     """Rasm qabul qilingandan keyin tugmalar"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="Rasmni yangilash", callback_data="photo_enhance")],
             [InlineKeyboardButton(text="🎬 Video qilish", callback_data="photo_to_video")],
             [InlineKeyboardButton(text="🖼 Chiqartirish", callback_data="photo_to_print")],
         ]
