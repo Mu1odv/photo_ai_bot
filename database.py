@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date
 from config import DATABASE_PATH
 
 class Database:
@@ -8,8 +9,11 @@ class Database:
 
     def get_connection(self):
         """Bazaga ulanish"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def init_db(self):
@@ -37,10 +41,15 @@ class Database:
                 details TEXT,
                 price INTEGER,
                 status TEXT DEFAULT 'pending',
+                order_date TEXT,
+                daily_seq INTEGER,
+                admin_notified INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        self._ensure_orders_columns(cursor)
 
         conn.commit()
         conn.close()
@@ -112,9 +121,19 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
+            order_date = date.today().isoformat()
             cursor.execute(
-                "INSERT INTO orders (user_id, username, full_name, order_type, details, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (user_id, username, full_name, order_type, details, price, status)
+                "SELECT COALESCE(MAX(daily_seq), 0) as max_seq FROM orders WHERE order_date = ?",
+                (order_date,)
+            )
+            max_seq = cursor.fetchone()[0] or 0
+            daily_seq = max_seq + 1
+            cursor.execute(
+                """
+                INSERT INTO orders (user_id, username, full_name, order_type, details, price, status, order_date, daily_seq)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, username, full_name, order_type, details, price, status, order_date, daily_seq)
             )
             conn.commit()
             return cursor.lastrowid
@@ -140,6 +159,117 @@ class Database:
             return cursor.fetchall()
         finally:
             conn.close()
+
+    def get_orders(self, status=None, order_date=None, limit=None):
+        """Buyurtmalarni filtr bilan olish"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            query = "SELECT * FROM orders"
+            conditions = []
+            params = []
+
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            if order_date:
+                conditions.append("order_date = ?")
+                params.append(order_date)
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            query += " ORDER BY created_at DESC"
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+
+            cursor.execute(query, params)
+            return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def get_orders_count(self, status=None, order_date=None):
+        """Buyurtmalar sonini olish"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            query = "SELECT COUNT(*) as count FROM orders"
+            conditions = []
+            params = []
+
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            if order_date:
+                conditions.append("order_date = ?")
+                params.append(order_date)
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            cursor.execute(query, params)
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        finally:
+            conn.close()
+
+    def _ensure_orders_columns(self, cursor):
+        cursor.execute("PRAGMA table_info(orders)")
+        columns = {row["name"] for row in cursor.fetchall()}
+
+        if "order_date" not in columns:
+            cursor.execute("ALTER TABLE orders ADD COLUMN order_date TEXT")
+
+        if "daily_seq" not in columns:
+            cursor.execute("ALTER TABLE orders ADD COLUMN daily_seq INTEGER")
+
+        if "admin_notified" not in columns:
+            cursor.execute("ALTER TABLE orders ADD COLUMN admin_notified INTEGER DEFAULT 0")
+
+        cursor.execute("UPDATE orders SET admin_notified = 0 WHERE admin_notified IS NULL")
+
+        self._backfill_order_meta(cursor)
+
+    def _backfill_order_meta(self, cursor):
+        cursor.execute(
+            "SELECT id, created_at, order_date, daily_seq FROM orders ORDER BY created_at ASC, id ASC"
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return
+
+        seq_by_date = {}
+        updates = []
+
+        for row in rows:
+            order_date = row["order_date"] or self._extract_order_date(row["created_at"]) or date.today().isoformat()
+            daily_seq = row["daily_seq"]
+
+            if daily_seq is None:
+                seq_by_date.setdefault(order_date, 0)
+                seq_by_date[order_date] += 1
+                daily_seq = seq_by_date[order_date]
+            else:
+                seq_by_date[order_date] = max(seq_by_date.get(order_date, 0), daily_seq)
+
+            updates.append((order_date, daily_seq, row["id"]))
+
+        cursor.executemany(
+            "UPDATE orders SET order_date = ?, daily_seq = ? WHERE id = ?",
+            updates,
+        )
+
+    @staticmethod
+    def _extract_order_date(created_at):
+        if not created_at:
+            return None
+
+        text = str(created_at)
+        if len(text) >= 10 and text[4] == "-":
+            return text[:10]
+        return None
 
     def update_order_status(self, order_id, status):
         """Buyurtma holatini yangilash"""
@@ -167,6 +297,21 @@ class Database:
         finally:
             conn.close()
 
+    def set_admin_notified(self, order_id, notified: bool):
+        """Admin xabardor qilinganini belgilash"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE orders SET admin_notified = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (1 if notified else 0, order_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
 
 # Global database instance
-db = Database()
+db = Database() 
+
+

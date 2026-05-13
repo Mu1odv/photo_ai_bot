@@ -37,6 +37,6 @@ def print_options_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🖼 Ramka bilan", callback_data="print_with_frame")],
-            [InlineKeyboardButton(text="📧 Elektron variant", callback_data="print_digital")],
+            [InlineKeyboardButton(text="🖼 Ramkasiz", callback_data="print_digital")],
         ]
     )

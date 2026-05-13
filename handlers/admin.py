@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from database import db
 from config import ADMIN_IDS
 import logging
+from datetime import date, timedelta
 
 router = Router()
 ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else None  # Asosiy admin ID
@@ -15,15 +16,66 @@ def order_type_label(order_type: str) -> str:
         "enhance": "Rasmni yangilash",
         "video": "Rasmdan video",
         "print_frame": "Ramka bilan chop etish",
-        "print_digital": "Elektron chop etish",
+        "print_digital": "Ramkasiz chop etish",
         "video_file": "Video fayl",
     }.get(order_type, order_type.replace("_", " ").title())
+
+
+def _today():
+    return date.today().isoformat()
+
+
+def _admin_notified_label(value) -> str:
+    if value is None:
+        return "Noma'lum"
+    return "Ha" if value else "Yo'q"
+
+
+def _order_date_label(order) -> str:
+    return order["order_date"] or (str(order["created_at"])[:10] if order["created_at"] else "-")
+
+
+def _render_order_text(order) -> str:
+    display_number = order["daily_seq"] or order["id"]
+    order_date = _order_date_label(order)
+    username_text = f"@{order['username']}" if order['username'] else "Mavjud emas"
+    admin_notified = _admin_notified_label(order["admin_notified"])
+    return (
+        f"📦 <b>Buyurtma #{display_number}</b>\n"
+        f"🆔 ID: <code>{order['id']}</code>\n"
+        f"👤 Foydalanuvchi: <a href='tg://user?id={order['user_id']}'>{order['full_name']}</a>\n"
+        f"📧 Username: {username_text}\n"
+        f"📝 Xizmat: {order_type_label(order['order_type'])}\n"
+        f"💰 Narx: {order['price']} ball\n"
+        f"⏳ Holat: {order['status']}\n"
+        f"📬 Adminga yuborildi: {admin_notified}\n"
+        f"📅 Sana: {order_date}"
+    )
+
+
+def _build_admin_date_picker(days: int = 14) -> InlineKeyboardMarkup:
+    buttons = []
+    current = date.today()
+    for _ in range(days):
+        label = current.strftime("%d %b")
+        buttons.append(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"admin_orders_date:{current.isoformat()}"
+            )
+        )
+        current -= timedelta(days=1)
+
+    rows = [buttons[i:i + 7] for i in range(0, len(buttons), 7)]
+    rows.append([InlineKeyboardButton(text="Bekor qilish", callback_data="admin_orders_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_menu():
     kb = [
         [KeyboardButton(text="📊 Statistika")],
         [KeyboardButton(text="📦 Buyurtmalar")],
+        [KeyboardButton(text="📋 Barcha buyurtmalar")],
         [KeyboardButton(text="🔙 Asosiy menyu")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -138,7 +190,16 @@ async def show_stats(message: Message):
         conn.close()
         count = result[0] if result else 0
         total_balance = balance_result[0] if balance_result and balance_result[0] is not None else 0
-        await message.answer(f"👥 Jami foydalanuvchilar: {count}\n💰 Jami balans: {total_balance} ball")
+        total_orders = db.get_orders_count()
+        today_orders = db.get_orders_count(order_date=_today())
+        pending_orders = db.get_orders_count(status="pending")
+        await message.answer(
+            f"👥 Jami foydalanuvchilar: {count}\n"
+            f"💰 Jami balans: {total_balance} ball\n"
+            f"📦 Jami buyurtmalar: {total_orders}\n"
+            f"📅 Bugungi buyurtmalar: {today_orders}\n"
+            f"⏳ Kutilayotgan buyurtmalar: {pending_orders}"
+        )
 
 
 @router.message(F.text == "📦 Buyurtmalar")
@@ -146,29 +207,91 @@ async def show_orders(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    orders = db.get_pending_orders()
+    today = _today()
+    orders = db.get_orders(order_date=today)
     if not orders:
-        await message.answer("📦 Hech qanday yangi buyurtma yo'q")
+        await message.answer("📦 Bugungi buyurtmalar yo'q")
         return
 
+    total_today = db.get_orders_count(order_date=today)
+    pending_today = db.get_orders_count(status="pending", order_date=today)
+    await message.answer(
+        f"📅 Bugungi buyurtmalar: {total_today}\n"
+        f"⏳ Pending: {pending_today}"
+    )
+
     for order in orders:
-        username_text = f"@{order['username']}" if order['username'] else "Mavjud emas"
-        text = (
-            f"📦 <b>Buyurtma #{order['id']}</b>\n"
-            f"👤 Foydalanuvchi: <a href='tg://user?id={order['user_id']}'>{order['full_name']}</a>\n"
-            f"📧 Username: {username_text}\n"
-            f"📝 Xizmat: {order_type_label(order['order_type'])}\n"
-            f"💰 Narx: {order['price']} ball\n"
-            f"⏳ Holat: {order['status']}\n"
-            f"📅 Yaratilgan: {order['created_at']}\n"
-        )
+        text = _render_order_text(order)
 
-        buttons = [
-            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_approve_{order['id']}"),
-             InlineKeyboardButton(text="❌ Rad etish", callback_data=f"order_reject_{order['id']}")]
-        ]
+        if order["status"] == "pending":
+            buttons = [
+                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_approve_{order['id']}"),
+                 InlineKeyboardButton(text="❌ Rad etish", callback_data=f"order_reject_{order['id']}")]
+            ]
 
-        await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+            await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        else:
+            await message.answer(text, parse_mode="HTML")
+
+
+@router.message(F.text == "📋 Barcha buyurtmalar")
+async def show_all_orders(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer(
+        "📋 Qaysi kunning buyurtmalarini ko'rmoqchisiz?",
+        reply_markup=_build_admin_date_picker()
+    )
+
+
+@router.callback_query(F.data == "admin_orders_cancel")
+async def admin_orders_cancel(callback: CallbackQuery):
+    await callback.answer("Bekor qilindi")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("admin_orders_date:"))
+async def admin_orders_by_date(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+
+    selected = callback.data.split(":", 1)[-1]
+    orders = db.get_orders(order_date=selected)
+
+    if not orders:
+        await callback.message.answer("📦 Bu kunda buyurtmalar yo'q")
+        await callback.answer("Buyurtmalar yo'q")
+        return
+
+    total_orders = db.get_orders_count(order_date=selected)
+    pending_orders = db.get_orders_count(status="pending", order_date=selected)
+    approved_orders = db.get_orders_count(status="approved", order_date=selected)
+    rejected_orders = db.get_orders_count(status="rejected", order_date=selected)
+
+    await callback.message.answer(
+        f"📅 Sana: {selected}\n"
+        f"📦 Jami buyurtmalar: {total_orders}\n"
+        f"⏳ Pending: {pending_orders}\n"
+        f"✅ Tasdiqlangan: {approved_orders}\n"
+        f"❌ Rad etilgan: {rejected_orders}"
+    )
+
+    for order in orders:
+        text = _render_order_text(order)
+        if order["status"] == "pending":
+            buttons = [
+                [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_approve_{order['id']}"),
+                 InlineKeyboardButton(text="❌ Rad etish", callback_data=f"order_reject_{order['id']}")]
+            ]
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        else:
+            await callback.message.answer(text, parse_mode="HTML")
+
+    await callback.answer("Tayyor")
 
 
 @router.callback_query(F.data.startswith("order_approve_"))

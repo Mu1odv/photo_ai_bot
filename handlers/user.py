@@ -17,7 +17,35 @@ from handlers.ai_service import enhance_image_with_ai, build_telegram_file_url
 logger = logging.getLogger(__name__)
 router = Router()
 
-ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else 0
+ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else None
+_admin_contact_cache = {"text": None}
+
+
+async def get_admin_contact(bot: Bot):
+    if not ADMIN_ID:
+        return None
+
+    cached = _admin_contact_cache.get("text")
+    if cached:
+        return cached
+
+    try:
+        chat = await bot.get_chat(ADMIN_ID)
+        if chat.username:
+            contact = f"@{chat.username}"
+        else:
+            contact = f"ID: {ADMIN_ID}"
+    except Exception:
+        contact = f"ID: {ADMIN_ID}"
+
+    _admin_contact_cache["text"] = contact
+    return contact
+
+
+def format_admin_contact_line(contact):
+    if not contact:
+        return "Admin hozircha belgilanmagan."
+    return f"Admin bilan bog'laning: {contact}"
 
 
 async def _send_media_group_with_caption(bot: Bot, chat_id: int, photos, caption: str):
@@ -190,7 +218,8 @@ async def photo_to_video(callback: CallbackQuery, state: FSMContext, bot: Bot):
     username = callback.from_user.username or "noma'lum"
     full_name = callback.from_user.full_name or "Foydalanuvchi"
 
-    admin_username = (await bot.get_me()).username
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
 
     # Ballarni tekshirish (rasm uchun konfiguratsiyadan olinadi)
     current_balance = db.get_balance(user_id)
@@ -200,7 +229,7 @@ async def photo_to_video(callback: CallbackQuery, state: FSMContext, bot: Bot):
             f"❌ Balans yetarli emas!\n\n"
             f"💰 Sizning balansingiz: {current_balance}\n"
             f"🎬 Video uchun kerak: {VIDEO_COST} bal\n\n"
-            f"Admin bilan bog'laning: @{admin_username}"
+            f"{contact_line}"
         )
         await callback.answer("❌ Balans yetarli emas")
         return
@@ -225,27 +254,39 @@ async def photo_to_video(callback: CallbackQuery, state: FSMContext, bot: Bot):
     )
     
     # Notify admin with media group (album)
+    notified = False
     if ADMIN_ID:
-        username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
-        admin_message = (
-            f"🎬 Video qilish uchun buyurtma #{order_id}\n\n"
-            f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
-            f"📧 Username: {username_text}\n"
-            f"🆔 User ID: <code>{user_id}</code>\n"
-            f"📋 Xizmat: Video yaratish\n"
-            f"📸 Rasmlar soni: {len(photos)}\n"
-            f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{VIDEO_COST})"
-        )
-        
-        if photos:
-            for i in range(0, len(photos), 10):
-                chunk = photos[i:i + 10]
-                media_group = [InputMediaPhoto(media=pid) for pid in chunk]
-                if i == 0:
-                    media_group[0].caption = admin_message
-                await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
-        else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        try:
+            username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
+            admin_message = (
+                f"🎬 Video qilish uchun buyurtma #{order_id}\n\n"
+                f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
+                f"📧 Username: {username_text}\n"
+                f"🆔 User ID: <code>{user_id}</code>\n"
+                f"📋 Xizmat: Video yaratish\n"
+                f"📸 Rasmlar soni: {len(photos)}\n"
+                f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{VIDEO_COST})"
+            )
+
+            if photos:
+                for i in range(0, len(photos), 10):
+                    chunk = photos[i:i + 10]
+                    media_group = []
+                    for idx, pid in enumerate(chunk):
+                        if i == 0 and idx == 0:
+                            media_group.append(
+                                InputMediaPhoto(media=pid, caption=admin_message, parse_mode="HTML")
+                            )
+                        else:
+                            media_group.append(InputMediaPhoto(media=pid))
+                    await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+            else:
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
+            notified = True
+        except Exception as e:
+            logger.warning(f"Admin notify failed for order {order_id}: {e}")
+
+    db.set_admin_notified(order_id, notified)
     
     await callback.answer("✅ Buyurtma qabul qilindi!")
     await state.clear()
@@ -267,13 +308,14 @@ async def photo_enhance(callback: CallbackQuery, state: FSMContext, bot: Bot):
         return
 
     current_balance = db.get_balance(user_id)
-    admin_username = (await bot.get_me()).username
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
     if current_balance < PHOTO_COST:
         await callback.message.answer(
             f"❌ Balans yetarli emas!\n\n"
             f"💰 Sizning balansingiz: {current_balance}\n"
             f"✨ Yangilash uchun kerak: {PHOTO_COST} bal\n\n"
-            f"Admin bilan bog'laning: @{admin_username}"
+            f"{contact_line}"
         )
         await callback.answer("❌ Balans yetarli emas")
         return
@@ -311,26 +353,38 @@ async def photo_enhance(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await _send_media_group_with_caption(bot, callback.message.chat.id, processed_outputs, caption)
     await callback.message.answer(f"💰 Balans: {new_balance} (-{PHOTO_COST})")
 
+    notified = False
     if ADMIN_ID:
-        username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
-        admin_message = (
-            f"✨ Rasmni yangilash buyurtma #{order_id}\n\n"
-            f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
-            f"📧 Username: {username_text}\n"
-            f"🆔 User ID: <code>{user_id}</code>\n"
-            f"📋 Xizmat: Rasmni yangilash\n"
-            f"📸 Rasmlar soni: {len(photos)}\n"
-            f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
-        )
-        if photos:
-            for i in range(0, len(photos), 10):
-                chunk = photos[i:i + 10]
-                media_group = [InputMediaPhoto(media=pid) for pid in chunk]
-                if i == 0:
-                    media_group[0].caption = admin_message
-                await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
-        else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        try:
+            username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
+            admin_message = (
+                f"✨ Rasmni yangilash buyurtma #{order_id}\n\n"
+                f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
+                f"📧 Username: {username_text}\n"
+                f"🆔 User ID: <code>{user_id}</code>\n"
+                f"📋 Xizmat: Rasmni yangilash\n"
+                f"📸 Rasmlar soni: {len(photos)}\n"
+                f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
+            )
+            if photos:
+                for i in range(0, len(photos), 10):
+                    chunk = photos[i:i + 10]
+                    media_group = []
+                    for idx, pid in enumerate(chunk):
+                        if i == 0 and idx == 0:
+                            media_group.append(
+                                InputMediaPhoto(media=pid, caption=admin_message, parse_mode="HTML")
+                            )
+                        else:
+                            media_group.append(InputMediaPhoto(media=pid))
+                    await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+            else:
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
+            notified = True
+        except Exception as e:
+            logger.warning(f"Admin notify failed for order {order_id}: {e}")
+
+    db.set_admin_notified(order_id, notified)
 
     await callback.answer("✅ Yangilash qabul qilindi!")
     await state.clear()
@@ -361,13 +415,14 @@ async def print_with_frame(callback: CallbackQuery, state: FSMContext, bot: Bot)
     # Ballarni tekshirish (rasm uchun konfiguratsiyadan olinadi)
     current_balance = db.get_balance(user_id)
     
-    admin_username = (await bot.get_me()).username
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
     if current_balance < PHOTO_COST:
         await callback.message.answer(
             f"❌ Balans yetarli emas!\n\n"
             f"💰 Sizning balansingiz: {current_balance}\n"
             f"🖼 Chiqartirish uchun kerak: {PHOTO_COST} bal\n\n"
-            f"Admin bilan bog'laning: @{admin_username}"
+            f"{contact_line}"
         )
         await callback.answer("❌ Balans yetarli emas")
         return
@@ -384,15 +439,14 @@ async def print_with_frame(callback: CallbackQuery, state: FSMContext, bot: Bot)
         price=PHOTO_COST,
     )
     
-    admin_username = (await bot.get_me()).username
-    
     # Respond to user
     await callback.message.answer(
-        f"✅ Buyurtmangiz qabul qilindi. Batafsil ma'lumot uchun admin bilan bog'laning: @{admin_username}\n"
+        f"✅ Buyurtmangiz qabul qilindi.\n"
+        f"{contact_line}\n"
         f"💰 Balans: {new_balance} (-{PHOTO_COST})"
     )
 
-    digital_caption = "Test natija (elektron variant)" if TEST_MODE else "Elektron variant"
+    digital_caption = "Test natija (ramkasiz variant)" if TEST_MODE else "Ramkasiz variant"
     await _send_media_group_with_caption(bot, callback.message.chat.id, photos, digital_caption)
 
     min_delivery_date = date.today() + timedelta(days=3)
@@ -410,28 +464,40 @@ async def print_with_frame(callback: CallbackQuery, state: FSMContext, bot: Bot)
     )
     
     # Notify admin with media group (album)
+    notified = False
     if ADMIN_ID:
-        username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
-        admin_message = (
-            f"📦 Buyurtma: #{order_id}\n\n"
-            f"🖼 Ramka bilan chiqartirish buyurtmasi\n\n"
-            f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
-            f"📧 Username: {username_text}\n"
-            f"🆔 User ID: <code>{user_id}</code>\n"
-            f"📋 Xizmat: Ramka bilan print\n"
-            f"📸 Rasmlar soni: {len(photos)}\n"
-            f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
-        )
-        
-        if photos:
-            for i in range(0, len(photos), 10):
-                chunk = photos[i:i + 10]
-                media_group = [InputMediaPhoto(media=pid) for pid in chunk]
-                if i == 0:
-                    media_group[0].caption = admin_message
-                await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
-        else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        try:
+            username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
+            admin_message = (
+                f"📦 Buyurtma: #{order_id}\n\n"
+                f"🖼 Ramka bilan chiqartirish buyurtmasi\n\n"
+                f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
+                f"📧 Username: {username_text}\n"
+                f"🆔 User ID: <code>{user_id}</code>\n"
+                f"📋 Xizmat: Ramka bilan print\n"
+                f"📸 Rasmlar soni: {len(photos)}\n"
+                f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
+            )
+
+            if photos:
+                for i in range(0, len(photos), 10):
+                    chunk = photos[i:i + 10]
+                    media_group = []
+                    for idx, pid in enumerate(chunk):
+                        if i == 0 and idx == 0:
+                            media_group.append(
+                                InputMediaPhoto(media=pid, caption=admin_message, parse_mode="HTML")
+                            )
+                        else:
+                            media_group.append(InputMediaPhoto(media=pid))
+                    await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+            else:
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
+            notified = True
+        except Exception as e:
+            logger.warning(f"Admin notify failed for order {order_id}: {e}")
+
+    db.set_admin_notified(order_id, notified)
     
     await callback.answer("✅ Buyurtma qabul qilindi!")
 
@@ -449,13 +515,14 @@ async def print_digital(callback: CallbackQuery, state: FSMContext, bot: Bot):
     # Ballarni tekshirish (rasm uchun konfiguratsiyadan olinadi)
     current_balance = db.get_balance(user_id)
     
-    admin_username = (await bot.get_me()).username
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
     if current_balance < PHOTO_COST:
         await callback.message.answer(
             f"❌ Balans yetarli emas!\n\n"
             f"💰 Sizning balansingiz: {current_balance}\n"
-            f"📧 Elektron variant uchun kerak: {PHOTO_COST} bal\n\n"
-            f"Admin bilan bog'laning: @{admin_username}"
+            f"🖼 Ramkasiz variant uchun kerak: {PHOTO_COST} bal\n\n"
+            f"{contact_line}"
         )
         await callback.answer("❌ Balans yetarli emas")
         return
@@ -472,40 +539,51 @@ async def print_digital(callback: CallbackQuery, state: FSMContext, bot: Bot):
         price=PHOTO_COST,
     )
     
-    admin_username = (await bot.get_me()).username
-    
     # Respond to user
     await callback.message.answer(
-        f"✅ Buyurtmangiz qabul qilindi. Batafsil ma'lumot uchun admin bilan bog'laning: @{admin_username}\n"
+        f"✅ Buyurtmangiz qabul qilindi.\n"
+        f"{contact_line}\n"
         f"💰 Balans: {new_balance} (-{PHOTO_COST})"
     )
 
-    digital_caption = "Test natija (elektron variant)" if TEST_MODE else "Elektron variant"
+    digital_caption = "Test natija (ramkasiz variant)" if TEST_MODE else "Ramkasiz variant"
     await _send_media_group_with_caption(bot, callback.message.chat.id, photos, digital_caption)
     
     # Notify admin with media group (album)
+    notified = False
     if ADMIN_ID:
-        username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
-        admin_message = (
-            f"📦 Buyurtma: #{order_id}\n\n"
-            f"📧 Elektron variant buyurtmasi\n\n"
-            f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
-            f"📧 Username: {username_text}\n"
-            f"🆔 User ID: <code>{user_id}</code>\n"
-            f"📋 Xizmat: Elektron variantni yuboring\n"
-            f"📸 Rasmlar soni: {len(photos)}\n"
-            f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
-        )
-        
-        if photos:
-            for i in range(0, len(photos), 10):
-                chunk = photos[i:i + 10]
-                media_group = [InputMediaPhoto(media=pid) for pid in chunk]
-                if i == 0:
-                    media_group[0].caption = admin_message
-                await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
-        else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        try:
+            username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
+            admin_message = (
+                f"📦 Buyurtma: #{order_id}\n\n"
+                f"🖼 Ramkasiz variant buyurtmasi\n\n"
+                f"👤 Foydalanuvchi: <a href='tg://user?id={user_id}'>{full_name}</a>\n"
+                f"📧 Username: {username_text}\n"
+                f"🆔 User ID: <code>{user_id}</code>\n"
+                f"📋 Xizmat: Ramkasiz chop etish\n"
+                f"📸 Rasmlar soni: {len(photos)}\n"
+                f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{PHOTO_COST})"
+            )
+
+            if photos:
+                for i in range(0, len(photos), 10):
+                    chunk = photos[i:i + 10]
+                    media_group = []
+                    for idx, pid in enumerate(chunk):
+                        if i == 0 and idx == 0:
+                            media_group.append(
+                                InputMediaPhoto(media=pid, caption=admin_message, parse_mode="HTML")
+                            )
+                        else:
+                            media_group.append(InputMediaPhoto(media=pid))
+                    await bot.send_media_group(chat_id=ADMIN_ID, media=media_group)
+            else:
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
+            notified = True
+        except Exception as e:
+            logger.warning(f"Admin notify failed for order {order_id}: {e}")
+
+    db.set_admin_notified(order_id, notified)
     
     await callback.answer("✅ Buyurtma qabul qilindi!")
     await state.clear()
@@ -635,7 +713,7 @@ async def delivery_address_received(message: Message, state: FSMContext, bot: Bo
             f"📧 Username: {username_text}\n"
             f"🆔 User ID: <code>{user_id}</code>"
         )
-        await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
 
     await state.clear()
 
@@ -657,11 +735,13 @@ async def show_balance(message: Message):
 
 # ==================== 💳 TO'LDIRISH ====================
 @router.message(F.text == BTN_TOPUP)
-async def topup(message: Message):
+async def topup(message: Message, bot: Bot):
     """Top-up info"""
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
     await message.answer(
         "💳 To'ldirish\n\n"
-        "Bugungi kuni bepul! Admin bilan bog'laning."
+        f"Bugungi kuni bepul!\n{contact_line}"
     )
 
 
@@ -669,20 +749,15 @@ async def topup(message: Message):
 @router.message(F.text == BTN_ADMIN)
 async def contact_admin(message: Message, bot: Bot):
     """Show admin contact"""
-    if ADMIN_ID:
-        try:
-            admin_chat = await bot.get_chat(ADMIN_ID)
-            admin_username = f"@{admin_chat.username}" if admin_chat.username else f"ID: <code>{ADMIN_ID}</code>"
-        except Exception:
-            admin_username = f"ID: <code>{ADMIN_ID}</code>"
-
+    admin_contact = await get_admin_contact(bot)
+    if admin_contact:
         await message.answer(
             f"👨‍💻 Admin bilan bog'lanish\n\n"
-            f"Admin: {admin_username}",
-            parse_mode="HTML"
+            f"Admin: {admin_contact}"
         )
-    else:
-        await message.answer("👨‍💻 Admin hozircha belgilanmagan.")
+        return
+
+    await message.answer("👨‍💻 Admin hozircha belgilanmagan.")
 
 
 # ==================== 🎬 VIDEO YUBORISH ====================
@@ -710,7 +785,7 @@ async def ask_for_video(message: Message, state: FSMContext, bot: Bot):
             f"🆔 User ID: <code>{user_id}</code>\n"
             f"📋 Xizmat: Video file"
         )
-        await bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_message, parse_mode="HTML")
 
 
 @router.message(UserStates.waiting_for_video, F.video)
@@ -727,13 +802,14 @@ async def handle_video(message: Message, state: FSMContext, bot: Bot):
     # Ballarni tekshirish (video uchun konfiguratsiyadan olinadi)
     current_balance = db.get_balance(user_id)
     
-    admin_username = (await bot.get_me()).username
+    admin_contact = await get_admin_contact(bot)
+    contact_line = format_admin_contact_line(admin_contact)
     if current_balance < VIDEO_COST:
         await message.answer(
             f"❌ Balans yetarli emas!\n\n"
             f"💰 Sizning balansingiz: {current_balance}\n"
             f"🎬 Video ishlash uchun kerak: {VIDEO_COST} bal\n\n"
-            f"Admin bilan bog'laning: @{admin_username}"
+            f"{contact_line}"
         )
         return
     
@@ -756,6 +832,7 @@ async def handle_video(message: Message, state: FSMContext, bot: Bot):
     )
     
     # Admin'ga video yuborish
+    notified = False
     if ADMIN_ID:
         username_text = f"@{username}" if username != "noma'lum" else "Mavjud emas"
         admin_caption = (
@@ -766,7 +843,7 @@ async def handle_video(message: Message, state: FSMContext, bot: Bot):
             f"📋 Xizmat: Video ishlash\n"
             f"💰 Balans kamaydi: {current_balance} → {new_balance} (-{VIDEO_COST})"
         )
-        
+
         try:
             await bot.send_video(
                 chat_id=ADMIN_ID,
@@ -774,10 +851,17 @@ async def handle_video(message: Message, state: FSMContext, bot: Bot):
                 caption=admin_caption,
                 parse_mode="HTML"
             )
+            notified = True
         except Exception as e:
             logger.error(f"Failed to send video to admin: {e}")
             # Fallback to text message
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_caption, parse_mode="HTML")
+            try:
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_caption, parse_mode="HTML")
+                notified = True
+            except Exception as fallback_error:
+                logger.error(f"Failed to send fallback admin message: {fallback_error}")
+
+    db.set_admin_notified(order_id, notified)
     
     await state.clear()
 
